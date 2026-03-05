@@ -3,6 +3,13 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 from catboost import CatBoostClassifier
+import os
+import zipfile
+
+# Автоматичне розпакування бази даних для хмари
+if not os.path.exists('ecommerce.db') and os.path.exists('ecommerce.zip'):
+    with zipfile.ZipFile('ecommerce.zip', 'r') as zip_ref:
+        zip_ref.extractall('.')
 
 st.set_page_config(page_title="Pro E-commerce Analytics", page_icon="🛍️", layout="wide")
 
