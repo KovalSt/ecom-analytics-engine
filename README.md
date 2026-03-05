@@ -1,4 +1,5 @@
 # 🛒 E-Commerce Data Engine: Analytics & ML Prediction
+🌍 **Live Dashboard:** [https://ecom-analytics-engine-pw7xfg4pdwcpykwqqszhfj.streamlit.app/]
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue.svg)
 ![SQLite](https://img.shields.io/badge/SQLite-Database-lightgrey.svg)
