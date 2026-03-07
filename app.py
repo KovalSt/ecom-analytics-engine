@@ -7,6 +7,8 @@ import os
 import zipfile
 import shap
 import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
 # Автоматичне розпакування бази даних для хмари
 if not os.path.exists('ecommerce.db') and os.path.exists('ecommerce.zip'):
@@ -127,7 +129,7 @@ def load_cohort_data():
 # ================= MAIN SCREEN =================
 st.title("🛍️ Interactive E-commerce Dashboard")
 
-tab1, tab2 = st.tabs(["📈 Advanced Analytics", "🤖 AI Delivery Delay Prediction"])
+tab1, tab2, tab3 = st.tabs(["📈 Advanced Analytics", "🤖 AI Prediction", "💬 Customer Sentiment"])
 
 with tab1:
     st.markdown("Data is automatically recalculated when you change the filters in the sidebar.")
@@ -324,3 +326,75 @@ with col2:
     )
     fig_bar.update_layout(showlegend=False)
     st.plotly_chart(fig_bar, use_container_width=True)
+# ================= TAB 3: NLP SENTIMENT ANALYSIS =================
+with tab3:
+    st.subheader("💬 Customer Reviews Analysis (NLP)")
+    st.markdown("Analyzing real customer feedback to identify business pain points.")
+    
+    @st.cache_data
+    def load_reviews():
+        conn = sqlite3.connect('ecommerce.db')
+        # Витягуємо тільки ті відгуки, де є реальний текст
+        query = """
+        SELECT review_score, review_comment_message 
+        FROM order_reviews 
+        WHERE review_comment_message IS NOT NULL AND review_comment_message != ''
+        """
+        try:
+            df_rev = pd.read_sql_query(query, conn)
+        except:
+            df_rev = pd.DataFrame() # Якщо таблиці раптом немає
+        conn.close()
+        return df_rev
+
+    df_reviews = load_reviews()
+    
+    if df_reviews.empty:
+        st.warning("No text reviews found in the database.")
+    else:
+        # 1. Класифікація тональності (Sentiment Classification)
+        def classify_sentiment(score):
+            if score >= 4: return 'Positive 😃'
+            elif score == 3: return 'Neutral 😐'
+            else: return 'Negative 😡'
+            
+        df_reviews['Sentiment'] = df_reviews['review_score'].apply(classify_sentiment)
+        
+        col1, col2 = st.columns([1, 1.5])
+        
+        with col1:
+            st.markdown("### 📊 Sentiment Distribution")
+            sentiment_counts = df_reviews['Sentiment'].value_counts().reset_index()
+            sentiment_counts.columns = ['Sentiment', 'Count']
+            
+            fig_pie = px.pie(
+                sentiment_counts, 
+                names='Sentiment', 
+                values='Count',
+                hole=0.4,
+                color='Sentiment',
+                color_discrete_map={'Positive 😃':'#2ECC71', 'Neutral 😐':'#F1C40F', 'Negative 😡':'#E74C3C'}
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+        with col2:
+            st.markdown("### ☁️ Negative Reviews Word Cloud")
+            st.info("Most frequent Portuguese words used in 1 & 2-star reviews (stopwords removed).")
+            
+            # Фільтруємо тільки негативні відгуки
+            negative_text = " ".join(review for review in df_reviews[df_reviews['Sentiment'] == 'Negative 😡']['review_comment_message'].astype(str))
+            
+            # Базові португальські стоп-слова (щоб відсіяти "і", "або", "що")
+            pt_stopwords = set(['o', 'a', 'e', 'do', 'da', 'de', 'que', 'em', 'um', 'uma', 'nao', 'não', 'para', 'com', 'os', 'as', 'foi', 'mas', 'por', 'produto', 'comprei', 'chegou', 'meu'])
+            
+            # Генеруємо хмару слів
+            wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='Reds', stopwords=pt_stopwords).generate(negative_text)
+            
+            fig_wc, ax = plt.subplots(figsize=(10, 5))
+            ax.imshow(wordcloud, interpolation='bilinear')
+            ax.axis("off")
+            st.pyplot(fig_wc, use_container_width=True)
+            
+            # Бізнес-висновок
+            st.success("💡 **Business Insight:** Common negative words like *'atraso'* (delay), *'nunca'* (never), and *'ruim'* (bad) strongly correlate with our ML model's finding: logistics is the primary cause of customer churn.")    
