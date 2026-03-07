@@ -23,8 +23,10 @@ This project is an end-to-end Data Science and Analytics solution built on the *
 * **Data Visualization:** Plotly Express
 * **Web Framework:** Streamlit
 
-## ⚙️ How to Run Locally
+## 🧠 Methodology & Exploratory Data Analysis (EDA)
+Curious about the feature selection for the ML model or the business logic behind the KPIs? Check out the [EDA_Business_Analysis.ipynb](EDA_Business_Analysis.ipynb) notebook for a deep dive into the data exploration process.
 
+## ⚙️ How to Run Locally
 1. **Clone the repository:**
    ```bash
    git clone [https://github.com/KovalSt/ecom-analytics-engine.git](https://github.com/KovalSt/ecom-analytics-engine.git)
