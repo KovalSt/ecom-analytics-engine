@@ -43,6 +43,39 @@ try:
 except Exception as e:
     st.error(f"Error loading data: {e}")
     st.stop()
+@st.cache_data
+def load_rfm_data():
+    # Підключаємось до нашої бази
+    conn = sqlite3.connect('ecommerce.db')
+    
+    # Виправлений SQL-запит з правильними назвами таблиць
+    query = """
+    SELECT 
+        c.customer_unique_id,
+        MAX(o.order_purchase_timestamp) as last_purchase_date,
+        COUNT(DISTINCT o.order_id) as frequency,
+        SUM(oi.price + oi.freight_value) as monetary
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+    WHERE o.order_status = 'delivered'
+    GROUP BY c.customer_unique_id
+    """
+    
+    # Читаємо дані в Pandas DataFrame
+    df_rfm = pd.read_sql_query(query, conn)
+    conn.close()
+    
+    # Перетворюємо текст у формат дати
+    df_rfm['last_purchase_date'] = pd.to_datetime(df_rfm['last_purchase_date'])
+    
+    # Знаходимо найновішу дату в усьому датасеті (це буде наше "сьогодні")
+    current_date = df_rfm['last_purchase_date'].max()
+    
+    # Рахуємо Recency (скільки днів пройшло від останньої покупки до "сьогодні")
+    df_rfm['recency'] = (current_date - df_rfm['last_purchase_date']).dt.days
+    
+    return df_rfm
 
 # ================= SIDEBAR (FILTERS) =================
 st.sidebar.header("🎛️ Filters")
@@ -157,3 +190,77 @@ with tab2:
                 st.success(f"✅ **On Track!** The order is expected to arrive on time. Delay risk: **{probability:.1f}%**.")
     except Exception as e:
         st.error("❌ Model not found. Please ensure the model is trained and saved.")
+# --- RFM ANALYSIS SECTION ---
+st.markdown("---")
+st.header("💎 Customer Segmentation (RFM Analysis)")
+
+# 1. Завантажуємо дані
+df_rfm = load_rfm_data()
+
+# 2. Рахуємо бали RFM (від 1 до 5)
+# R (Recency): чим менше днів, тим вищий бал (5 - купували недавно)
+df_rfm['R_Score'] = pd.qcut(df_rfm['recency'], q=5, labels=[5, 4, 3, 2, 1])
+
+# F (Frequency): оскільки в Olist більшість купує 1 раз, пропишемо логіку вручну
+def get_f_score(x):
+    if x == 1: return 1
+    elif x == 2: return 2
+    elif x == 3: return 3
+    elif x == 4: return 4
+    else: return 5
+df_rfm['F_Score'] = df_rfm['frequency'].apply(get_f_score)
+
+# M (Monetary): чим більша сума, тим вищий бал
+df_rfm['M_Score'] = pd.qcut(df_rfm['monetary'], q=5, labels=[1, 2, 3, 4, 5])
+
+# 3. Розбиваємо на бізнес-сегменти англійською
+def segment_customer(row):
+    R = int(row['R_Score'])
+    F = int(row['F_Score'])
+    
+    if R >= 4 and F >= 2:
+        return '🏆 Champions (Frequent & Recent)'
+    elif R >= 3 and F >= 2:
+        return '💖 Loyal (Regular)'
+    elif R >= 4 and F == 1:
+        return '🛍️ New (Bought once recently)'
+    elif R == 2 or R == 3:
+        return '💤 At Risk (Sleeping)'
+    else:
+        return '❌ Lost (Bought long ago)'
+
+df_rfm['Segment'] = df_rfm.apply(segment_customer, axis=1)
+
+# 4. Підготовка даних для графіка
+segment_counts = df_rfm['Segment'].value_counts().reset_index()
+segment_counts.columns = ['Segment', 'Number of Customers']
+
+# 5. Малюємо красивий 2D Treemap
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    fig_treemap = px.treemap(
+        segment_counts, 
+        path=['Segment'], 
+        values='Number of Customers',
+        color='Number of Customers',
+        color_continuous_scale='Blues',
+        title='Customer Base Distribution'
+    )
+    fig_treemap.update_traces(textinfo="label+value+percent root")
+    st.plotly_chart(fig_treemap, use_container_width=True)
+
+with col2:
+    st.markdown("### 📊 Revenue by Segment")
+    segment_monetary = df_rfm.groupby('Segment')['monetary'].sum().reset_index()
+    fig_bar = px.bar(
+        segment_monetary, 
+        x='monetary', 
+        y='Segment', 
+        orientation='h',
+        color='monetary',
+        color_continuous_scale='Greens',
+        labels={'monetary': 'Total Revenue ($)', 'Segment': ''}
+    )
+    fig_bar.update_layout(showlegend=False)
+    st.plotly_chart(fig_bar, use_container_width=True)
