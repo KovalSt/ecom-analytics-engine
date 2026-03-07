@@ -5,6 +5,8 @@ import plotly.express as px
 from catboost import CatBoostClassifier
 import os
 import zipfile
+import shap
+import matplotlib.pyplot as plt
 
 # Автоматичне розпакування бази даних для хмари
 if not os.path.exists('ecommerce.db') and os.path.exists('ecommerce.zip'):
@@ -94,6 +96,33 @@ if selected_states:
     mask = mask & (df['customer_state'].isin(selected_states))
     
 filtered_df = df[mask]
+@st.cache_data
+def load_cohort_data():
+    conn = sqlite3.connect('ecommerce.db')
+    
+    # Витягуємо тільки унікального клієнта і дату його покупки
+    query = """
+    SELECT 
+        c.customer_unique_id, 
+        o.order_purchase_timestamp 
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    WHERE o.order_status = 'delivered'
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+
+    df['order_purchase_timestamp'] = pd.to_datetime(df['order_purchase_timestamp'])
+    df['order_month'] = df['order_purchase_timestamp'].to_numpy().astype('datetime64[M]')
+    df['cohort_month'] = df.groupby('customer_unique_id')['order_month'].transform('min')
+    df['cohort_index'] = (df['order_month'].dt.year - df['cohort_month'].dt.year) * 12 + \
+                         (df['order_month'].dt.month - df['cohort_month'].dt.month)
+    cohort_data = df.groupby(['cohort_month', 'cohort_index'])['customer_unique_id'].nunique().reset_index()
+    cohort_pivot = cohort_data.pivot(index='cohort_month', columns='cohort_index', values='customer_unique_id')
+    cohort_sizes = cohort_pivot.iloc[:, 0]
+    retention = cohort_pivot.divide(cohort_sizes, axis=0)
+    retention.index = retention.index.strftime('%Y-%m')
+    return retention
 
 # ================= MAIN SCREEN =================
 st.title("🛍️ Interactive E-commerce Dashboard")
@@ -188,8 +217,39 @@ with tab2:
                 st.error(f"⚠️ **WARNING: High Risk of Delay!** Probability of logistic failure: **{probability:.1f}%**.")
             else:
                 st.success(f"✅ **On Track!** The order is expected to arrive on time. Delay risk: **{probability:.1f}%**.")
+            
+            # --- SHAP EXPLAINABILITY ---
+            st.markdown("---")
+            st.subheader("🧠 Why did the model make this prediction? (SHAP Values)")
+            st.info("This chart explains how each feature impacted the final prediction. Red bars push the risk higher (towards a delay), while blue bars push it lower (towards on-time delivery).")
+
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer(input_data) # Використовуємо правильну змінну
+            fig, ax = plt.subplots(figsize=(8, 4))
+            shap.plots.waterfall(shap_values[0], show=False)
+            
+            st.pyplot(fig, use_container_width=True)
+
     except Exception as e:
         st.error("❌ Model not found. Please ensure the model is trained and saved.")
+# --- COHORT ANALYSIS SECTION ---
+st.markdown("---")
+st.header("🔄 Customer Retention (Cohort Analysis)")
+
+retention_matrix = load_cohort_data()
+retention_clean = retention_matrix.iloc[3:, 1:13] 
+fig_cohort = px.imshow(
+    retention_clean,
+    text_auto='.2%', 
+    aspect="auto",
+    color_continuous_scale='Teal',
+    title="Customer Retention Rates by Cohort (Months 1-12)",
+    labels=dict(x="Months Since First Purchase", y="Cohort Month", color="Retention")
+)
+
+fig_cohort.update_xaxes(side="top")
+st.plotly_chart(fig_cohort, use_container_width=True)
+st.info("💡 **Insight:** In the Olist marketplace, most customers make a single purchase. The retention heatmap skips 'Month 0' (100%) to highlight the actual returning customer patterns in the following months.")
 # --- RFM ANALYSIS SECTION ---
 st.markdown("---")
 st.header("💎 Customer Segmentation (RFM Analysis)")
